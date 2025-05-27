@@ -29,29 +29,65 @@ respuesta_model = api.model('RespuestaBusqueda', {
 })
 
 # ======================
-# Cargar todos los datos al iniciar
+# Variables y carga inicial
 # ======================
-DATA_FOLDER = "data"
 BODEGA_DATA = []
+
+def estandarizar_dataframe(df: pd.DataFrame, nombre_archivo: str) -> pd.DataFrame:
+    columnas = [str(col).lower().strip() for col in df.columns]
+    df.columns = columnas
+
+    df["producto_id"] = df.index.astype(str)
+
+    if 'nombre' in columnas:
+        df["nombre_producto"] = df["nombre"].astype(str)
+    elif 'productos' in columnas:
+        df["nombre_producto"] = df["productos"].astype(str)
+    elif 'descripción' in columnas:
+        df["nombre_producto"] = df["descripción"].astype(str)
+    else:
+        df["nombre_producto"] = "SIN_NOMBRE"
+
+    posibles_stock = [c for c in columnas if 'stock' in c or 'cant' in c]
+    if posibles_stock:
+        df["disponibilidad"] = pd.to_numeric(df[posibles_stock[0]], errors='coerce').fillna(0).astype(int)
+    else:
+        df["disponibilidad"] = 0
+
+    posibles_precio = [c for c in columnas if 'precio' in c]
+    if posibles_precio:
+        precio_raw = df[posibles_precio[0]].astype(str).str.replace("$", "").str.replace(",", "").str.replace(".", "", regex=False)
+        df["precio"] = pd.to_numeric(precio_raw, errors='coerce') / 100
+    else:
+        df["precio"] = 0.0
+
+    df["presentacion"] = df["nombre_producto"].str.extract(r"(FRASCO.*|TAB.*|CX\d+)", expand=False).fillna("N/A")
+    df["bodega"] = os.path.splitext(nombre_archivo)[0].lower()
+    df["tiempo_entrega"] = "2 días"
+
+    return df[["producto_id", "nombre_producto", "presentacion", "precio", "disponibilidad", "bodega", "tiempo_entrega"]]
 
 def cargar_datos_bodegas():
     global BODEGA_DATA
     BODEGA_DATA.clear()
 
-    if not os.path.exists(DATA_FOLDER):
-        os.makedirs(DATA_FOLDER)
+    archivos = [f for f in os.listdir(".") if f.endswith(".xlsx") or f.endswith(".xls")]
+    for archivo in archivos:
+        try:
+            extension = os.path.splitext(archivo)[1].lower()
+            if extension == ".xlsx":
+                df = pd.read_excel(archivo, engine="openpyxl")
+            elif extension == ".xls":
+                df = pd.read_excel(archivo, engine="xlrd")
+            else:
+                continue
 
-    for archivo in os.listdir(DATA_FOLDER):
-        if archivo.endswith(".csv"):
-            path = os.path.join(DATA_FOLDER, archivo)
-            try:
-                df = pd.read_csv(path)
-                if "nombre_producto" in df.columns:
-                    df["bodega"] = df["bodega"].fillna(os.path.splitext(archivo)[0].replace("bodega_", ""))
-                    BODEGA_DATA.append(df)
-            except Exception as e:
-                print(f"Error cargando {archivo}: {e}")
+            df_normalizado = estandarizar_dataframe(df, archivo)
+            BODEGA_DATA.append(df_normalizado)
+        except Exception as e:
+            print(f"Error cargando {archivo}: {e}")
 
+# Ejecutar carga inicial
 cargar_datos_bodegas()
 
 # ======================
@@ -94,7 +130,8 @@ class BuscarProducto(Resource):
         }
 
 # ======================
-# Run
+# Run local (no usado en Render)
 # ======================
 if __name__ == '__main__':
     app.run(debug=True, port=8080)
+
