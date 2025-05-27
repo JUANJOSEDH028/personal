@@ -129,6 +129,18 @@ class BuscarProducto(Resource):
             "opciones": resultados
         }
 
+
+@app.route('/debug/bodegas')
+def debug():
+    resumen = []
+    for df in BODEGA_DATA:
+        if not df.empty:
+            resumen.append({
+                "bodega": df['bodega'].iloc[0],
+                "productos": len(df)
+            })
+    return {"total_bodegas": len(BODEGA_DATA), "detalle": resumen}
+
 # ======================
 # Run local (no usado en Render)
 # ======================
