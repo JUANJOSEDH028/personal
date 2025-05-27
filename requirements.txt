@@ -1,4 +1,6 @@
 flask
 flask-restx
 pandas
+openpyxl
+xlrd
 gunicorn
