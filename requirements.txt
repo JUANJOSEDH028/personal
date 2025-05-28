@@ -4,3 +4,4 @@ pandas
 openpyxl
 xlrd
 gunicorn
+fpdf
