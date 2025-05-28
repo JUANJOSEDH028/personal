@@ -7,6 +7,7 @@ from email.message import EmailMessage
 import smtplib
 from fpdf import FPDF
 
+
 # Inicialización
 app = Flask(__name__)
 api = Api(app, version='1.0', title='API Cotizador Farmacéutico',
@@ -135,86 +136,125 @@ class BuscarProducto(Resource):
 # ======================
 # Endpoint: Enviar PDF por correo
 # ======================
+from flask import request
+from flask_restx import Resource
+from email.message import EmailMessage
+from email.header import Header
+import smtplib, os
+from dotenv import load_dotenv
+
+load_dotenv()  # Asegúrate de que esté en tu archivo principal
+
+
+
+
 def enviar_correo(destinatario, archivo_pdf):
-    from email.header import Header
-    from email.utils import formataddr
+    remitente = os.getenv("EMAIL_SENDER")
+    clave = os.getenv("contrasenaApp")
+
+    print("Remitente:", remitente)
+    print("Destinatario:", destinatario)
+    print("Archivo:", archivo_pdf)
 
     msg = EmailMessage()
-    msg['Subject'] = 'Cotización Farmacéutica'
-    msg['From'] = formataddr((str(Header('Cotizador', 'utf-8')), 'tu_correo@gmail.com'))
+    msg['Subject'] = str(Header('Cotización Farmacéutica', 'utf-8'))
+    msg['From'] = remitente
     msg['To'] = destinatario
+    msg.set_content('Adjunto encontrarás el archivo con la cotización solicitada.')
 
-    # Contenido codificado explícitamente como UTF-8
-    msg.set_content('Adjunto encontrarás el archivo con la cotización solicitada.', charset='utf-8')
-
-    # Adjuntar el archivo con nombre codificado correctamente
+    file_name = os.path.basename(archivo_pdf)
     with open(archivo_pdf, 'rb') as f:
         file_data = f.read()
-        file_name = os.path.basename(archivo_pdf)
-        # Asegura que el nombre del archivo esté en UTF-8
-        msg.add_attachment(file_data, maintype='application', subtype='pdf', filename=(Header(file_name, 'utf-8').encode()))
+        msg.add_attachment(file_data, maintype='application', subtype='pdf', filename=file_name)
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login('tu_correo@gmail.com', 'tu_contraseña_de_aplicación')
+        smtp.login(remitente, clave)
         smtp.send_message(msg)
 
+# ======================    
 @ns.route('/enviar')
 class EnviarPDF(Resource):
     @ns.expect(correo_model)
     def post(self):
-        data = request.json
-        correo = data.get('correo')
-        archivo_pdf = data.get('archivo_pdf')
-
-        if not os.path.exists(archivo_pdf):
-            return {'error': f'El archivo {archivo_pdf} no existe en el servidor.'}, 400
-
         try:
+            data = request.get_json(force=True)
+            correo = data.get('correo')
+            archivo_pdf = data.get('archivo_pdf')
+
+            print("Petición recibida: ", data)
+
+            if not correo or not archivo_pdf:
+                return {'error': 'Faltan parámetros requeridos: correo o archivo_pdf'}, 400
+
+            if not os.path.exists(archivo_pdf):
+                return {'error': f'El archivo {archivo_pdf} no existe en el servidor.'}, 400
+
             enviar_correo(correo, archivo_pdf)
             return {'mensaje': f'Cotización enviada exitosamente a {correo}.'}
+
         except Exception as e:
             return {'error': str(e)}, 500
 
+from flask_restx import fields
+
+# Definición del modelo de entrada para generar PDF
+generar_pdf_model = api.model('GenerarPDF', {
+    'nombre_archivo': fields.String(required=True, description='Nombre del archivo PDF'),
+    'carrito': fields.List(fields.Nested(api.model('ItemCarrito', {
+        'producto_id': fields.String,
+        'nombre_producto': fields.String,
+        'presentacion': fields.String,
+        'precio': fields.Float,
+        'disponibilidad': fields.Integer,
+        'bodega': fields.String,
+        'tiempo_entrega': fields.String,
+        'cantidad': fields.Integer
+    })))
+})
+
+
 @ns.route('/generar-pdf')
 class GenerarPDF(Resource):
+    @ns.expect(generar_pdf_model)  # <- ESTA LÍNEA ES CLAVE
     def post(self):
-        data = request.json
-        carrito = data.get("carrito", [])
-        nombre_archivo = data.get("nombre_archivo", "cotizacion.pdf")
-
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-
-        pdf.cell(200, 10, txt="Cotización de productos farmacéuticos", ln=True, align='C')
-        pdf.ln(10)
-
-        total = 0
-        for idx, item in enumerate(carrito, start=1):
-            cantidad = int(item.get("cantidad", 1))
-            precio_unitario = float(item.get("precio", 0))
-            subtotal = precio_unitario * cantidad
-
-            linea = (
-                f"{idx}. {item.get('nombre_producto', 'N/A')} - "
-                f"{item.get('presentacion', 'N/A')} - "
-                f"${precio_unitario:.2f} x {cantidad} = ${subtotal:.2f} - "
-                f"Bodega: {item.get('bodega', 'N/A')}"
-            )
-            pdf.multi_cell(0, 10, linea)
-            total += subtotal
-
-        pdf.ln(5)
-        pdf.cell(200, 10, txt=f"Total: ${total:.2f}", ln=True)
-
         try:
+            data = request.get_json(force=True)
+            carrito = data.get("carrito", [])
+            nombre_archivo = data.get("nombre_archivo", "cotizacion.pdf")
+
+            if not carrito:
+                return {"error": "El carrito no contiene productos válidos."}, 400
+
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+
+            pdf.cell(200, 10, txt="Cotización de productos farmacéuticos", ln=True, align='C')
+            pdf.ln(10)
+
+            total = 0
+            for idx, item in enumerate(carrito, start=1):
+                cantidad = int(item.get("cantidad", 1))
+                precio_unitario = float(item.get("precio", 0))
+                subtotal = precio_unitario * cantidad
+
+                linea = (
+                    f"{idx}. {item.get('nombre_producto', 'N/A')} - "
+                    f"{item.get('presentacion', 'N/A')} - "
+                    f"${precio_unitario:.2f} x {cantidad} = ${subtotal:.2f} - "
+                    f"Bodega: {item.get('bodega', 'N/A')}"
+                )
+                pdf.multi_cell(0, 10, linea)
+                total += subtotal
+
+            pdf.ln(5)
+            pdf.cell(200, 10, txt=f"Total: ${total:.2f}", ln=True)
+
             pdf.output(nombre_archivo)
-            return {"mensaje": "PDF generado correctamente", "archivo": nombre_archivo}
+            return {"mensaje": "PDF generado correctamente", "archivo": nombre_archivo}, 200
+
         except Exception as e:
-            return {"error": f"No se pudo generar el PDF: {str(e)}"}, 500
-
-
-
+            return {"error": str(e)}, 500
 
 # ======================
 # Endpoint de depuración
@@ -235,4 +275,5 @@ def debug():
 # ======================
 if __name__ == '__main__':
     app.run(debug=True, port=8080)
+
 
