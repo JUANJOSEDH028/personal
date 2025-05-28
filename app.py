@@ -136,16 +136,23 @@ class BuscarProducto(Resource):
 # Endpoint: Enviar PDF por correo
 # ======================
 def enviar_correo(destinatario, archivo_pdf):
+    from email.header import Header
+    from email.utils import formataddr
+
     msg = EmailMessage()
     msg['Subject'] = 'Cotización Farmacéutica'
-    msg['From'] = 'tu_correo@gmail.com'
+    msg['From'] = formataddr((str(Header('Cotizador', 'utf-8')), 'tu_correo@gmail.com'))
     msg['To'] = destinatario
-    msg.set_content('Adjunto encontrarás el archivo con la cotización solicitada.')
 
+    # Contenido codificado explícitamente como UTF-8
+    msg.set_content('Adjunto encontrarás el archivo con la cotización solicitada.', charset='utf-8')
+
+    # Adjuntar el archivo con nombre codificado correctamente
     with open(archivo_pdf, 'rb') as f:
         file_data = f.read()
         file_name = os.path.basename(archivo_pdf)
-        msg.add_attachment(file_data, maintype='application', subtype='pdf', filename=file_name)
+        # Asegura que el nombre del archivo esté en UTF-8
+        msg.add_attachment(file_data, maintype='application', subtype='pdf', filename=(Header(file_name, 'utf-8').encode()))
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login('tu_correo@gmail.com', 'tu_contraseña_de_aplicación')
