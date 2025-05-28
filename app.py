@@ -1,24 +1,21 @@
-from flask import Flask, request, send_file
-from flask_restx import Api, Resource, fields
+
+from flask import Flask, request
+from flask_restx import Api, Resource, fields, reqparse
 import pandas as pd
-from fpdf import FPDF
-import smtplib
 import os
 from email.message import EmailMessage
-import tempfile
-from dotenv import load_dotenv
-from flask_restx import reqparse
+import smtplib
+from fpdf import FPDF
 
-
-load_dotenv()
+# Inicialización
 app = Flask(__name__)
 api = Api(app, version='1.0', title='API Cotizador Farmacéutico',
-          description='Busca productos en múltiples bodegas locales', doc="/docs")
+          description='Operaciones de búsqueda y envío de cotización', doc="/docs")
 
-ns = api.namespace('productos', description='Operaciones de cotización')
+ns = api.namespace('productos', description='Endpoints de productos')
 
 # ======================
-# Modelo para Swagger UI
+# Modelos para Swagger UI
 # ======================
 producto_model = api.model('Producto', {
     'producto_id': fields.String,
@@ -34,6 +31,11 @@ respuesta_model = api.model('RespuestaBusqueda', {
     'disponible': fields.Boolean,
     'mensaje': fields.String,
     'opciones': fields.List(fields.Nested(producto_model))
+})
+
+correo_model = api.model('CorreoConPDF', {
+    'correo': fields.String(required=True, description='Correo del destinatario'),
+    'archivo_pdf': fields.String(required=True, description='Nombre del archivo PDF generado')
 })
 
 # ======================
@@ -78,7 +80,6 @@ def estandarizar_dataframe(df: pd.DataFrame, nombre_archivo: str) -> pd.DataFram
 def cargar_datos_bodegas():
     global BODEGA_DATA
     BODEGA_DATA.clear()
-
     archivos = [f for f in os.listdir(".") if f.endswith(".xlsx") or f.endswith(".xls")]
     for archivo in archivos:
         try:
@@ -89,24 +90,19 @@ def cargar_datos_bodegas():
                 df = pd.read_excel(archivo, engine="xlrd")
             else:
                 continue
-
             df_normalizado = estandarizar_dataframe(df, archivo)
             BODEGA_DATA.append(df_normalizado)
         except Exception as e:
             print(f"Error cargando {archivo}: {e}")
 
-# Ejecutar carga inicial
 cargar_datos_bodegas()
-
-# ======================
-# Parser para búsqueda
-# ======================
-buscar_parser = reqparse.RequestParser()
-buscar_parser.add_argument('nombre', type=str, required=True, help='Nombre del producto a buscar')
 
 # ======================
 # Endpoint: Buscar producto
 # ======================
+buscar_parser = reqparse.RequestParser()
+buscar_parser.add_argument('nombre', type=str, required=True, help='Nombre del producto a buscar')
+
 @ns.route('/buscar')
 class BuscarProducto(Resource):
     @ns.expect(buscar_parser)
@@ -114,7 +110,6 @@ class BuscarProducto(Resource):
     def get(self):
         args = buscar_parser.parse_args()
         nombre = args['nombre'].strip().lower()
-
         resultados = []
 
         for df in BODEGA_DATA:
@@ -137,35 +132,9 @@ class BuscarProducto(Resource):
             "opciones": resultados
         }
 
-
-@app.route('/debug/bodegas')
-def debug():
-    resumen = []
-    for df in BODEGA_DATA:
-        if not df.empty:
-            resumen.append({
-                "bodega": df['bodega'].iloc[0],
-                "productos": len(df)
-            })
-    return {"total_bodegas": len(BODEGA_DATA), "detalle": resumen}
-
-
-from flask import Flask, request, send_file
-from flask_restx import Api, Resource, fields, Namespace
-import smtplib
-from email.message import EmailMessage
-import os
-
-app = Flask(__name__)
-api = Api(app, version='1.0', title='API Cotizador Farmacéutico', description='Cotización y envío por correo')
-ns = api.namespace('productos', description='Operaciones relacionadas con productos')
-
-# Modelo para la solicitud de envío de PDF
-correo_model = api.model('CorreoConPDF', {
-    'correo': fields.String(required=True, description='Correo del destinatario'),
-    'archivo_pdf': fields.String(required=True, description='Nombre del archivo PDF generado (ej: cotizacion.pdf)')
-})
-
+# ======================
+# Endpoint: Enviar PDF por correo
+# ======================
 def enviar_correo(destinatario, archivo_pdf):
     msg = EmailMessage()
     msg['Subject'] = 'Cotización Farmacéutica'
@@ -199,11 +168,22 @@ class EnviarPDF(Resource):
         except Exception as e:
             return {'error': str(e)}, 500
 
-if __name__ == '__main__':
-    app.run(debug=True, port=8080)
+# ======================
+# Endpoint de depuración
+# ======================
+@app.route('/debug/bodegas')
+def debug():
+    resumen = []
+    for df in BODEGA_DATA:
+        if not df.empty:
+            resumen.append({
+                "bodega": df['bodega'].iloc[0],
+                "productos": len(df)
+            })
+    return {"total_bodegas": len(BODEGA_DATA), "detalle": resumen}
 
 # ======================
-# Run
+# Ejecutar app
 # ======================
 if __name__ == '__main__':
     app.run(debug=True, port=8080)
