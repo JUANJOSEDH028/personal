@@ -168,6 +168,47 @@ class EnviarPDF(Resource):
         except Exception as e:
             return {'error': str(e)}, 500
 
+@ns.route('/generar-pdf')
+class GenerarPDF(Resource):
+    def post(self):
+        data = request.json
+        carrito = data.get("carrito", [])
+        nombre_archivo = data.get("nombre_archivo", "cotizacion.pdf")
+
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+
+        pdf.cell(200, 10, txt="Cotización de productos farmacéuticos", ln=True, align='C')
+        pdf.ln(10)
+
+        total = 0
+        for idx, item in enumerate(carrito, start=1):
+            cantidad = int(item.get("cantidad", 1))
+            precio_unitario = float(item.get("precio", 0))
+            subtotal = precio_unitario * cantidad
+
+            linea = (
+                f"{idx}. {item.get('nombre_producto', 'N/A')} - "
+                f"{item.get('presentacion', 'N/A')} - "
+                f"${precio_unitario:.2f} x {cantidad} = ${subtotal:.2f} - "
+                f"Bodega: {item.get('bodega', 'N/A')}"
+            )
+            pdf.multi_cell(0, 10, linea)
+            total += subtotal
+
+        pdf.ln(5)
+        pdf.cell(200, 10, txt=f"Total: ${total:.2f}", ln=True)
+
+        try:
+            pdf.output(nombre_archivo)
+            return {"mensaje": "PDF generado correctamente", "archivo": nombre_archivo}
+        except Exception as e:
+            return {"error": f"No se pudo generar el PDF: {str(e)}"}, 500
+
+
+
+
 # ======================
 # Endpoint de depuración
 # ======================
