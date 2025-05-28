@@ -150,68 +150,57 @@ def debug():
     return {"total_bodegas": len(BODEGA_DATA), "detalle": resumen}
 
 
-CARRITO = []  # Puedes adaptarlo a tu lógica
+from flask import Flask, request, send_file
+from flask_restx import Api, Resource, fields, Namespace
+import smtplib
+from email.message import EmailMessage
+import os
 
-EMAIL_SENDER = os.getenv("EMAIL_SENDER")
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+app = Flask(__name__)
+api = Api(app, version='1.0', title='API Cotizador Farmacéutico', description='Cotización y envío por correo')
+ns = api.namespace('productos', description='Operaciones relacionadas con productos')
 
-# Namespace para cotización
-ns_cotizacion = api.namespace('cotizacion', description='Envío de cotización por correo')
-
-correo_model = api.model('SolicitudCorreo', {
-    'correo': fields.String(required=True, description='Correo electrónico del destinatario')
+# Modelo para la solicitud de envío de PDF
+correo_model = api.model('CorreoConPDF', {
+    'correo': fields.String(required=True, description='Correo del destinatario'),
+    'archivo_pdf': fields.String(required=True, description='Nombre del archivo PDF generado (ej: cotizacion.pdf)')
 })
-def generar_pdf(carrito):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt="Cotización de productos", ln=True, align='C')
-
-    total = 0
-    for item in carrito:
-        pdf.ln(10)
-        pdf.cell(200, 10, txt=f"{item['nombre_producto']} - ${item['precio']} - {item['bodega']}", ln=True)
-        total += float(item['precio'])
-
-    pdf.ln(10)
-    pdf.cell(200, 10, txt=f"Total: ${total:.2f}", ln=True)
-    
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-    pdf.output(temp_file.name)
-    return temp_file.name
 
 def enviar_correo(destinatario, archivo_pdf):
     msg = EmailMessage()
-    msg['Subject'] = 'Tu cotización de productos'
-    msg['From'] = EMAIL_SENDER
+    msg['Subject'] = 'Cotización Farmacéutica'
+    msg['From'] = 'tu_correo@gmail.com'
     msg['To'] = destinatario
-    msg.set_content("Adjunto encontrarás el PDF con tu cotización de productos farmacéuticos.")
+    msg.set_content('Adjunto encontrarás el archivo con la cotización solicitada.')
 
     with open(archivo_pdf, 'rb') as f:
         file_data = f.read()
-        msg.add_attachment(file_data, maintype='application', subtype='pdf', filename='cotizacion.pdf')
+        file_name = os.path.basename(archivo_pdf)
+        msg.add_attachment(file_data, maintype='application', subtype='pdf', filename=file_name)
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        smtp.login('tu_correo@gmail.com', 'tu_contraseña_de_aplicación')
         smtp.send_message(msg)
 
 @ns.route('/enviar')
-class EnviarCotizacion(Resource):
+class EnviarPDF(Resource):
     @ns.expect(correo_model)
     def post(self):
-        if not CARRITO:
-            return {'mensaje': 'No hay productos en la cotización.'}, 400
-
         data = request.json
-        correo = data.get("correo")
+        correo = data.get('correo')
+        archivo_pdf = data.get('archivo_pdf')
+
+        if not os.path.exists(archivo_pdf):
+            return {'error': f'El archivo {archivo_pdf} no existe en el servidor.'}, 400
 
         try:
-            archivo_pdf = generar_pdf(CARRITO)
             enviar_correo(correo, archivo_pdf)
-            os.remove(archivo_pdf)
             return {'mensaje': f'Cotización enviada exitosamente a {correo}.'}
         except Exception as e:
             return {'error': str(e)}, 500
+
+if __name__ == '__main__':
+    app.run(debug=True, port=8080)
 
 # ======================
 # Run
